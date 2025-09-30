@@ -274,7 +274,7 @@ int server_main() {
                 string ok = string(PROTO_AUTH_OK) + "\n";
                 send(client, ok.c_str(), (int)ok.size(), 0);
 
-                // сообщение о подключении (оставляю твою русскую строку)
+                // сообщение о подключении 
                 string msg = string(PROTO_SERVER_TAG) + " " + login + " подключился\n";
                 cout << msg;
 

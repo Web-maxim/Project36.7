@@ -249,7 +249,7 @@ bool Database::isBanned(const std::string& login) {
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         std::cerr << "Ошибка SQL (isBanned)\n";
-        return false; // осторожный дефолт — считаем «не забанен», но ты можешь вернуть true
+        return false; // осторожный дефолт — считаем «не забанен», при необходимости можно вернуть true
     }
 
     sqlite3_bind_text(stmt, 1, login.c_str(), -1, SQLITE_STATIC);
@@ -296,7 +296,7 @@ vector<Message> Database::getAllMessages() {
             const unsigned char* s = sqlite3_column_text(stmt, 1);
             m.sender = s ? reinterpret_cast<const char*>(s) : "";
 
-            // безопасно читаем recipient (у тебя уже было ок)
+            // безопасно читаем recipient 
             const unsigned char* r = sqlite3_column_text(stmt, 2);
             m.recipient = r ? reinterpret_cast<const char*>(r) : "";
 
