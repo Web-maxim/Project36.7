@@ -34,6 +34,9 @@ public:
     bool addBan(const string& login, long long untilEpochSec, const string& reason);
     bool removeBan(const string& login);
     bool isBanned(const string& login);
+    bool requestKick(const string& login);     // сохранить запрос на кик
+    bool consumeKick(const string& login);     // есть ли запрос? если да — удалить и вернуть true
+
 
     void printAllMessages();
     vector<string> getAllUsers();

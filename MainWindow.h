@@ -23,7 +23,7 @@ private slots:
     void stopClient();
     void banSelected();
     void unbanSelected();
-
+    void kickSelected(); // для кнопки кик
 
 private:
     QTabWidget* tabs_;

@@ -139,7 +139,52 @@ int server_main() {
 
     while (true) {
         fd_set copy = master;
-        int socketCount = select(0, &copy, nullptr, nullptr, nullptr);
+        timeval tv{};
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+        int socketCount = select(0, &copy, nullptr, nullptr, &tv);
+
+        // фоновая проверка запросов на кик
+        vector<SOCKET> toKick;
+        for (u_int j = 0; j < master.fd_count; j++) {
+            SOCKET s = master.fd_array[j];
+            if (s == serverSock) continue;
+            auto it = clientNames.find(s);
+            if (it == clientNames.end()) continue;
+            const string& who = it->second;
+            if (db.consumeKick(who)) {
+                toKick.push_back(s);
+            }
+        }
+        for (SOCKET s : toKick) {
+            string who = clientNames[s];
+            string byeSelf = string(PROTO_SERVER_TAG) + " Вас отключил администратор (kick).\n";
+            send(s, byeSelf.c_str(), (int)byeSelf.size(), 0);
+
+            string byeAll = string(PROTO_SERVER_TAG) + " " + who + " отключён (kick)\n";
+            cout << byeAll;
+
+            clientNames.erase(s);
+            acc.erase(s);
+            auto itLS = loginToSock.find(who);
+            if (itLS != loginToSock.end() && itLS->second == s) loginToSock.erase(itLS);
+
+            FD_CLR(s, &master);
+#ifdef _WIN32
+            closesocket(s);
+#else
+            close(s);
+#endif
+            for (u_int j2 = 0; j2 < master.fd_count; j2++) {
+                SOCKET outSock = master.fd_array[j2];
+                if (outSock != serverSock) {
+                    send(outSock, byeAll.c_str(), (int)byeAll.size(), 0);
+                }
+            }
+        }
+
+        if (socketCount <= 0) continue;
+
 
         for (int i = 0; i < socketCount; i++) {
             SOCKET sock = copy.fd_array[i];
@@ -186,6 +231,19 @@ int server_main() {
                 // === НОВОЕ: бан-чек перед OK ===
                 if (authorized && db.isBanned(login)) {
                     // имитируем отказ, как при неуспешной авторизации
+                    string err = string(PROTO_AUTH_FAIL) + "\n";
+                    send(client, err.c_str(), (int)err.size(), 0);
+#ifdef _WIN32
+                    closesocket(client);
+#else
+                    close(client);
+#endif
+                    FD_CLR(client, &master);
+                    continue;
+                }
+
+                // если на логин уже висит «кик» — сразу не пускаем
+                if (db.consumeKick(login)) {
                     string err = string(PROTO_AUTH_FAIL) + "\n";
                     send(client, err.c_str(), (int)err.size(), 0);
 #ifdef _WIN32

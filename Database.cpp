@@ -71,6 +71,13 @@ bool Database::init() {
         "  reason TEXT"
         ");";
 
+    // таблица «киков»: одно активное требование на логин
+    const char* createKicks =
+        "CREATE TABLE IF NOT EXISTS kicks ("
+        "  login TEXT PRIMARY KEY, "
+        "  requested_at INTEGER NOT NULL"
+        ");";
+
     char* errMsg = nullptr;
 
     if (sqlite3_exec(db, createUsers, nullptr, nullptr, &errMsg) != SQLITE_OK) {
@@ -88,6 +95,12 @@ bool Database::init() {
         sqlite3_free(errMsg);
         return false;
     }
+    if (sqlite3_exec(db, createKicks, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        cerr << "Ошибка SQL (kicks): " << errMsg << endl;
+        sqlite3_free(errMsg);
+        return false;
+    }
+
 
     cout << "Database is ready.\n"; //  "База данных готова.\n";
     return true;
@@ -325,4 +338,36 @@ vector<string> Database::getAllUsers() {
     }
 
     return users;
+}
+
+bool Database::requestKick(const string& login) {
+    if (!db) return false;
+    const char* sql = "INSERT OR REPLACE INTO kicks(login, requested_at) VALUES(?, strftime('%s','now'));";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, login.c_str(), -1, SQLITE_STATIC);
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool Database::consumeKick(const string& login) {
+    if (!db) return false;
+
+    // проверим наличие
+    const char* sel = "SELECT 1 FROM kicks WHERE login=?;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sel, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, login.c_str(), -1, SQLITE_STATIC);
+    bool has = (sqlite3_step(stmt) == SQLITE_ROW);
+    sqlite3_finalize(stmt);
+    if (!has) return false;
+
+    // удалим отметку — «поглотим» кик
+    const char* del = "DELETE FROM kicks WHERE login=?;";
+    if (sqlite3_prepare_v2(db, del, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, login.c_str(), -1, SQLITE_STATIC);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return true;
 }

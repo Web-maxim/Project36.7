@@ -43,6 +43,17 @@ MainWindow::MainWindow(QWidget* parent)
     usersView_->setModel(usersModel_);
     usersView_->horizontalHeader()->setStretchLastSection(true);
 
+    // Выделяем строки целиком и только одну строку
+    usersView_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    usersView_->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    // Делаем, чтобы выделение было одинаковым и при потере фокуса
+    QPalette pal = usersView_->palette();
+    pal.setColor(QPalette::Inactive, QPalette::Highlight, pal.color(QPalette::Active, QPalette::Highlight));
+    pal.setColor(QPalette::Inactive, QPalette::HighlightedText, pal.color(QPalette::Active, QPalette::HighlightedText));
+    usersView_->setPalette(pal);
+
+
     messagesView_->setModel(messagesModel_);
     messagesView_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     messagesView_->horizontalHeader()->setStretchLastSection(true);
@@ -70,7 +81,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(actBan, &QAction::triggered, this, &MainWindow::banSelected);
     auto* actUnban = tb->addAction(tr("Unban"));
     connect(actUnban, &QAction::triggered, this, &MainWindow::unbanSelected);
-
+    auto* actKick = tb->addAction(tr("Kick"));
+    connect(actKick, &QAction::triggered, this, &MainWindow::kickSelected);
 
     // Периодическое автообновление раз в 2 сек
     refreshTimer_ = new QTimer(this);
@@ -144,6 +156,27 @@ void MainWindow::unbanSelected() {
     }
     else {
         QMessageBox::critical(this, tr("Unban"), tr("Не удалось снять бан."));
+    }
+}
+
+void MainWindow::kickSelected() {
+    if (tabs_->currentWidget() != usersView_) tabs_->setCurrentWidget(usersView_);
+
+    auto idx = usersView_->currentIndex();
+    if (!idx.isValid()) {
+        QMessageBox::warning(this, tr("Kick"), tr("Выберите пользователя в списке Users."));
+        return;
+    }
+
+    // если в таблице помечен "  [BANNED]" — отрежем суффикс
+    QString loginFull = usersModel_->item(idx.row(), 0)->text();
+    QString login = loginFull.split(' ').first();
+
+    if (db_.requestKick(login.toStdString())) {
+        statusBar()->showMessage(tr("Запрошен кик для %1").arg(login), 3000);
+    }
+    else {
+        QMessageBox::critical(this, tr("Kick"), tr("Не удалось запросить кик."));
     }
 }
 
