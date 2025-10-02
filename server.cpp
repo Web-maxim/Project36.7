@@ -75,13 +75,13 @@ static inline std::string trim_copy(const std::string& s) {
 static void sendUsersListTo(SOCKET client, Database& db) {
     auto users = db.getAllUsers();
     string start = string(PROTO_USERS_BEGIN) + "\n";
-    send(client, start.c_str(), (int)start.size(), 0);
+    sendAll(client, start.c_str(), start.size());
     for (const auto& u : users) {
         string line = u + "\n";
-        send(client, line.c_str(), (int)line.size(), 0);
+        sendAll(client, line.c_str(), line.size());
     }
     string end = string(PROTO_USERS_END) + "\n";
-    send(client, end.c_str(), (int)end.size(), 0);
+    sendAll(client, end.c_str(), end.size());
 }
 
 int server_main() {
@@ -159,7 +159,7 @@ int server_main() {
         for (SOCKET s : toKick) {
             string who = clientNames[s];
             string byeSelf = string(PROTO_SERVER_TAG) + " Вас отключил администратор (kick).\n";
-            send(s, byeSelf.c_str(), (int)byeSelf.size(), 0);
+            sendAll(s, byeSelf.c_str(), byeSelf.size());
 
             string byeAll = string(PROTO_SERVER_TAG) + " " + who + " отключён (kick)\n";
             cout << byeAll;
@@ -178,13 +178,51 @@ int server_main() {
             for (u_int j2 = 0; j2 < master.fd_count; j2++) {
                 SOCKET outSock = master.fd_array[j2];
                 if (outSock != serverSock) {
-                    send(outSock, byeAll.c_str(), (int)byeAll.size(), 0);
+                    sendAll(outSock, byeAll.c_str(), byeAll.size());
+                }
+            }
+        }
+
+        // фоновая проверка банов (выкидываем даже молчащих клиентов)
+        vector<SOCKET> toBan;
+        for (u_int j = 0; j < master.fd_count; j++) {
+            SOCKET s = master.fd_array[j];
+            if (s == serverSock) continue;
+            auto it = clientNames.find(s);
+            if (it == clientNames.end()) continue;
+            const string& who = it->second;
+            if (db.isBanned(who)) {
+                toBan.push_back(s);
+            }
+        }
+        for (SOCKET s : toBan) {
+            string who = clientNames[s];
+            string byeSelf = string(PROTO_SERVER_TAG) + " Вы забанены. Соединение будет закрыто.\n";
+            sendAll(s, byeSelf.c_str(), byeSelf.size());
+
+            string byeAll = string(PROTO_SERVER_TAG) + " " + who + " отключён (ban)\n";
+            cout << byeAll;
+
+            clientNames.erase(s);
+            acc.erase(s);
+            auto itLS = loginToSock.find(who);
+            if (itLS != loginToSock.end() && itLS->second == s) loginToSock.erase(itLS);
+
+            FD_CLR(s, &master);
+#ifdef _WIN32
+            closesocket(s);
+#else
+            close(s);
+#endif
+            for (u_int j2 = 0; j2 < master.fd_count; j2++) {
+                SOCKET outSock = master.fd_array[j2];
+                if (outSock != serverSock) {
+                    sendAll(outSock, byeAll.c_str(), byeAll.size());
                 }
             }
         }
 
         if (socketCount <= 0) continue;
-
 
         for (int i = 0; i < socketCount; i++) {
             SOCKET sock = copy.fd_array[i];
@@ -193,6 +231,17 @@ int server_main() {
                 // новый клиент
                 SOCKET client = accept(serverSock, nullptr, nullptr);
                 if (client == INVALID_SOCKET) continue;
+
+                // --- таймаут чтения только для первой строки авторизации ---
+#ifdef _WIN32
+                DWORD tmp_to = 3000; // 3 сек
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tmp_to, sizeof(tmp_to));
+#else
+                timeval tmp_tv; tmp_tv.tv_sec = 3; tmp_tv.tv_usec = 0;
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tmp_tv, sizeof(tmp_tv));
+#endif
+                // ------------------------------------------------------------
+
                 FD_SET(client, &master);
 
                 bool authorized = false;
@@ -207,6 +256,16 @@ int server_main() {
                     if (ch == '\n') break;
                     if (ch != '\r') firstMsg.push_back(ch);
                 }
+
+                // --- вернуть сокет к обычному (блокирующему) режиму: убрать таймаут ---
+#ifdef _WIN32
+                DWORD tmp_to0 = 0; // 0 = бесконечный таймаут (блокирующий)
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tmp_to0, sizeof(tmp_to0));
+#else
+                timeval tmp_tv0; tmp_tv0.tv_sec = 0; tmp_tv0.tv_usec = 0;
+                setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tmp_tv0, sizeof(tmp_tv0));
+#endif
+                // ----------------------------------------------------------------------
 
                 if (!firstMsg.empty()) {
                     size_t pos = firstMsg.find(':');
@@ -228,11 +287,11 @@ int server_main() {
                     }
                 }
 
-                // === НОВОЕ: бан-чек перед OK ===
+                // --- МГНОВЕННЫЙ КИК ... ---
                 if (authorized && db.isBanned(login)) {
                     // имитируем отказ, как при неуспешной авторизации
                     string err = string(PROTO_AUTH_FAIL) + "\n";
-                    send(client, err.c_str(), (int)err.size(), 0);
+                    sendAll(client, err.c_str(), err.size());
 #ifdef _WIN32
                     closesocket(client);
 #else
@@ -245,7 +304,7 @@ int server_main() {
                 // если на логин уже висит «кик» — сразу не пускаем
                 if (db.consumeKick(login)) {
                     string err = string(PROTO_AUTH_FAIL) + "\n";
-                    send(client, err.c_str(), (int)err.size(), 0);
+                    sendAll(client, err.c_str(), err.size());
 #ifdef _WIN32
                     closesocket(client);
 #else
@@ -257,7 +316,7 @@ int server_main() {
 
                 if (!authorized) {
                     string err = string(PROTO_AUTH_FAIL) + "\n";
-                    send(client, err.c_str(), (int)err.size(), 0);
+                    sendAll(client, err.c_str(), err.size());
 #ifdef _WIN32
                     closesocket(client);
 #else
@@ -272,7 +331,7 @@ int server_main() {
                 loginToSock[login] = client;
 
                 string ok = string(PROTO_AUTH_OK) + "\n";
-                send(client, ok.c_str(), (int)ok.size(), 0);
+                sendAll(client, ok.c_str(), ok.size());
 
                 // сообщение о подключении 
                 string msg = string(PROTO_SERVER_TAG) + " " + login + " подключился\n";
@@ -290,7 +349,7 @@ int server_main() {
                     string line = "[" + m.sender +
                         (m.recipient.empty() ? " -> ALL" : " -> " + m.recipient) +
                         "] " + m.text + "\n";
-                    send(client, line.c_str(), (int)line.size(), 0);
+                    sendAll(client, line.c_str(), line.size());
                 }
 
                 // список пользователей подключившемуся
@@ -300,13 +359,13 @@ int server_main() {
                 for (u_int j = 0; j < master.fd_count; j++) {
                     SOCKET outSock = master.fd_array[j];
                     if (outSock != serverSock && outSock != client) {
-                        send(outSock, msg.c_str(), (int)msg.size(), 0);
+                        sendAll(outSock, msg.c_str(), msg.size());
                     }
                 }
             }
 
             else {
-                char buffer[1024];
+                char buffer[4096]; // было 1024
                 int n = recv(sock, buffer, sizeof(buffer), 0);
 
                 if (n <= 0) {
@@ -334,11 +393,11 @@ int server_main() {
                     for (u_int j = 0; j < master.fd_count; j++) {
                         SOCKET outSock = master.fd_array[j];
                         if (outSock != serverSock) {
-                            send(outSock, msg.c_str(), (int)msg.size(), 0);
+                            sendAll(outSock, msg.c_str(), msg.size());
                         }
                     }
                 }
-                else {                   
+                else {
 
                     // --- МГНОВЕННЫЙ КИК ЕСЛИ СТАЛ ЗАБАНЕН ПОКА ОН В СЕТИ ---
                     {
@@ -348,7 +407,7 @@ int server_main() {
                             if (db.isBanned(who)) {
                                 // Сообщим пользователю и всем остальным
                                 std::string byeSelf = std::string(PROTO_SERVER_TAG) + " Вы забанены. Соединение будет закрыто.\n";
-                                send(sock, byeSelf.c_str(), (int)byeSelf.size(), 0);
+                                sendAll(sock, byeSelf.c_str(), byeSelf.size());
 
                                 std::string byeAll = std::string(PROTO_SERVER_TAG) + " " + who + " отключён (ban)\n";
                                 std::cout << byeAll;
@@ -369,7 +428,7 @@ int server_main() {
                                 for (u_int j = 0; j < master.fd_count; j++) {
                                     SOCKET outSock = master.fd_array[j];
                                     if (outSock != serverSock) {
-                                        send(outSock, byeAll.c_str(), (int)byeAll.size(), 0);
+                                        sendAll(outSock, byeAll.c_str(), byeAll.size());
                                     }
                                 }
                                 // и переходим к следующему сокету
@@ -377,7 +436,7 @@ int server_main() {
                             }
                         }
                     }   // --- конец проверки бана ---
-                                        
+
                     // построчный приём + фильтрация пустых
                     acc[sock].append(buffer, buffer + n);
 
@@ -398,7 +457,7 @@ int server_main() {
                             help += "  " + string(PROTO_CMD_USERS) + "              — список пользователей\n";
                             help += "  " + string(PROTO_CMD_WHISPER) + " <login> <текст>  — личное сообщение\n";
                             help += "  exit                — выход (на клиенте)\n";
-                            send(sock, help.c_str(), (int)help.size(), 0);
+                            sendAll(sock, help.c_str(), help.size());
                             continue;
                         }
 
@@ -414,21 +473,21 @@ int server_main() {
                             size_t sp = rest.find(' ');
                             if (sp == string::npos) {
                                 string help = string(PROTO_SERVER_TAG) + " Использование: " + string(PROTO_CMD_WHISPER) + " <login> <текст>\n";
-                                send(sock, help.c_str(), (int)help.size(), 0);
+                                sendAll(sock, help.c_str(), help.size());
                                 continue;
                             }
                             string toLogin = trim_copy(rest.substr(0, sp));
                             string body = trim_copy(rest.substr(sp + 1));
                             if (toLogin.empty() || body.empty()) {
                                 string help = string(PROTO_SERVER_TAG) + " Использование: " + string(PROTO_CMD_WHISPER) + " <login> <текст>\n";
-                                send(sock, help.c_str(), (int)help.size(), 0);
+                                sendAll(sock, help.c_str(), help.size());
                                 continue;
                             }
 
                             auto it = loginToSock.find(toLogin);
                             if (it == loginToSock.end()) {
                                 string err = string(PROTO_SERVER_TAG) + " Пользователь '" + toLogin + "' не в сети\n";
-                                send(sock, err.c_str(), (int)err.size(), 0);
+                                sendAll(sock, err.c_str(), err.size());
                                 continue;
                             }
 
@@ -439,8 +498,8 @@ int server_main() {
                             string out = "[" + from + " -> " + toLogin + "] " + body + "\n";
 
                             // отправляем адресату и отправителю (подтверждение)
-                            send(it->second, out.c_str(), (int)out.size(), 0);
-                            send(sock, out.c_str(), (int)out.size(), 0);
+                            sendAll(it->second, out.c_str(), out.size());
+                            sendAll(sock, out.c_str(), out.size());
 
                             // сохраняем в БД как приватное
                             db.addMessage(from, toLogin, body);
@@ -459,7 +518,7 @@ int server_main() {
                         for (u_int j = 0; j < master.fd_count; j++) {
                             SOCKET outSock = master.fd_array[j];
                             if (outSock != serverSock && outSock != sock) {
-                                send(outSock, out.c_str(), (int)out.size(), 0);
+                                sendAll(outSock, out.c_str(), out.size());
                             }
                         }
                     }

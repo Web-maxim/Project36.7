@@ -150,54 +150,28 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AutocompleteRU.cpp" />
-    <ClCompile Include="Chat.cpp" />
     <ClCompile Include="client.cpp" />
     <ClCompile Include="Config.cpp" />
-    <ClCompile Include="ConsoleUtilsRU.cpp" />
     <ClCompile Include="Database.cpp" />
-    <ClCompile Include="db_test.cpp" />
-    <ClCompile Include="db_test2.cpp" />
-    <ClCompile Include="DictionaryRU.cpp" />
-    <ClCompile Include="fgq_mt_demo.cpp" />
-    <ClCompile Include="fgq_test.cpp" />
-    <ClCompile Include="FineGrainedQueue.cpp" />
-    <ClCompile Include="Graph.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainWindow.cpp" />
-    <ClCompile Include="program.cpp" />
     <ClCompile Include="server.cpp" />
     <ClCompile Include="sha1.cpp" />
     <ClCompile Include="sqlite3.c" />
-    <ClCompile Include="Trie.cpp" />
-    <ClCompile Include="User.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="AutocompleteRU.h" />
-    <ClInclude Include="Chat.h" />
     <ClInclude Include="client.h" />
     <ClInclude Include="Config.h" />
-    <ClInclude Include="ConsoleUtilsRU.h" />
     <ClInclude Include="Database.h" />
-    <ClInclude Include="DictionaryRU.h" />
-    <ClInclude Include="FineGrainedQueue.h" />
-    <ClInclude Include="Graph.h" />
     <QtMoc Include="MainWindow.h" />
-    <ClInclude Include="Message.h" />
     <ClInclude Include="net_proto.h" />
-    <ClInclude Include="program.h" />
     <ClInclude Include="server.h" />
     <ClInclude Include="sha1.h" />
     <ClInclude Include="sqlite3.h" />
-    <ClInclude Include="Trie.h" />
-    <ClInclude Include="User.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="CMakeLists.txt" />
     <Text Include="config.txt" />
-    <Text Include="messages.txt" />
-    <Text Include="ru_words.txt" />
-    <Text Include="users.txt" />
   </ItemGroup>
   <ItemGroup>
     <None Include="CMakePresets.json" />

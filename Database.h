@@ -13,6 +13,7 @@ struct Message {
     string sender;
     string recipient;
     string text;
+    long long created_at = 0;
 };
 
 class Database {

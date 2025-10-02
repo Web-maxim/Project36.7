@@ -32,6 +32,7 @@ bld/
 [Oo]ut/
 [Ll]og/
 [Ll]ogs/
+delete/
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
@@ -101,6 +102,23 @@ StyleCopReport.xml
 *.vcxproj
 *.vcxproj.filters
 *.sln
+
+# VS / CMake / Qt
+.vs/
+CMakeFiles/
+CMakeCache.txt
+cmake-build*/
+build*/
+*.user
+*.opendb
+*.vcxproj.user
+*.db
+*.log
+*.obj
+*.pdb
+*.ipch
+*.ilk
+*.qrc.depends
 
 # Chutzpah Test files
 _Chutzpah*
@@ -365,3 +383,14 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# --- Runtime data (SQLite + app config) ---
+config.txt
+chat.db
+chat.db-wal
+chat.db-shm
+
+# --- Qt generated (на всякий случай, если вдруг попадут в исходники) ---
+moc_*.cpp
+ui_*.h
+qrc_*.cpp

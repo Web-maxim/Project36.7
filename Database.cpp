@@ -4,7 +4,8 @@
 #include <sstream>
 #include <cctype>
 #include <algorithm>
-#include "sha1.h"  
+#include "sha1.h"
+#include <cstring> // для strcmp в PRAGMA table_info
 
 using namespace std;
 
@@ -45,6 +46,10 @@ Database::~Database() {
 bool Database::init() {
     if (!db) return false;
 
+    // включаем WAL и немного снижаем синхронизацию
+    sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
+
     // пользователи
     const char* createUsers =
         "CREATE TABLE IF NOT EXISTS users ("
@@ -54,13 +59,14 @@ bool Database::init() {
         "  name TEXT"
         ");";
 
-    // сообщения
+    // сообщения (в новой схеме уже есть created_at)
     const char* createMessages =
         "CREATE TABLE IF NOT EXISTS messages ("
         "  id INTEGER PRIMARY KEY AUTOINCREMENT, "
         "  sender TEXT, "
         "  recipient TEXT, "
-        "  text TEXT"
+        "  text TEXT, "
+        "  created_at INTEGER"
         ");";
 
     // БАНЫ: login (PK), until (UNIX-эпоха, NULL = перманентный бан), reason
@@ -90,6 +96,27 @@ bool Database::init() {
         sqlite3_free(errMsg);
         return false;
     }
+
+    // === МИГРАЦИЯ created_at: добавляем колонку в старую таблицу, если её нет ===
+    {
+        sqlite3_stmt* stmtInfo = nullptr;
+        bool hasCreatedAt = false;
+        if (sqlite3_prepare_v2(db, "PRAGMA table_info(messages);", -1, &stmtInfo, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmtInfo) == SQLITE_ROW) {
+                const unsigned char* col = sqlite3_column_text(stmtInfo, 1); // 1 = name
+                if (col && std::strcmp(reinterpret_cast<const char*>(col), "created_at") == 0) {
+                    hasCreatedAt = true; break;
+                }
+            }
+            sqlite3_finalize(stmtInfo);
+        }
+        if (!hasCreatedAt) {
+            // добавляем колонку времени
+            sqlite3_exec(db, "ALTER TABLE messages ADD COLUMN created_at INTEGER;", nullptr, nullptr, nullptr);
+        }
+    }
+    // ==========================================================================
+
     if (sqlite3_exec(db, createBans, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         cerr << "Ошибка SQL (баны): " << errMsg << endl;
         sqlite3_free(errMsg);
@@ -101,11 +128,9 @@ bool Database::init() {
         return false;
     }
 
-
-    cout << "Database is ready.\n"; //  "База данных готова.\n";
+    cout << "Database is ready.\n";
     return true;
 }
-
 
 bool Database::addUser(const string& login, const string& password, const string& name) {
     if (!db) return false;
@@ -177,7 +202,12 @@ bool Database::checkUser(const string& login, const string& password) {
 
 bool Database::addMessage(const string& sender, const string& recipient, const string& text) {
     if (!db) return false;
-    const char* sql = "INSERT INTO messages (sender, recipient, text) VALUES (?, ?, ?);";
+
+    // пишем время через strftime('%s','now') (UNIX-время в секундах)
+    const char* sql =
+        "INSERT INTO messages (sender, recipient, text, created_at) "
+        "VALUES (?, ?, ?, strftime('%s','now'));";
+
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         cerr << "Ошибка подготовки запроса addMessage\n";
@@ -285,7 +315,8 @@ vector<Message> Database::getAllMessages() {
     vector<Message> result;
     if (!db) return result;
 
-    const char* sql = "SELECT id, sender, recipient, text FROM messages;";
+    // читаем время тоже
+    const char* sql = "SELECT id, sender, recipient, text, created_at FROM messages;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -296,13 +327,21 @@ vector<Message> Database::getAllMessages() {
             const unsigned char* s = sqlite3_column_text(stmt, 1);
             m.sender = s ? reinterpret_cast<const char*>(s) : "";
 
-            // безопасно читаем recipient 
+            // безопасно читаем recipient
             const unsigned char* r = sqlite3_column_text(stmt, 2);
             m.recipient = r ? reinterpret_cast<const char*>(r) : "";
 
             // безопасно читаем text
             const unsigned char* t = sqlite3_column_text(stmt, 3);
             m.text = t ? reinterpret_cast<const char*>(t) : "";
+
+            // время (может быть NULL для старых строк)
+            if (sqlite3_column_type(stmt, 4) == SQLITE_NULL) {
+                m.created_at = 0;
+            }
+            else {
+                m.created_at = static_cast<long long>(sqlite3_column_int64(stmt, 4));
+            }
 
             result.push_back(m);
         }
@@ -317,7 +356,7 @@ void Database::printAllMessages() {
             << (m.recipient.empty() ? "ALL" : m.recipient) << ": "
             << m.text << endl;
     }
-} 
+}
 
 vector<string> Database::getAllUsers() {
     vector<string> users;

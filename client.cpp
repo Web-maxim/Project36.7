@@ -8,6 +8,10 @@
 #include <vector>
 #include "Config.h"   // читать ip/port из config.txt
 #include "net_proto.h"
+#include <fstream>
+#include <sstream>
+#include <map>
+#include <string>
 
 // --- Fallback, если что-то не определено в net_proto.h ---
 #ifndef PROTO_USERS_BEGIN
@@ -55,17 +59,6 @@ typedef int SOCKET;
 using namespace std;
 
 static atomic<bool> running(true);
-
-// надёжная отправка всего буфера (боремся с частичной отправкой)
-static bool sendAll(SOCKET s, const char* data, int len) {
-    int sent = 0;
-    while (sent < len) {
-        int rc = send(s, data + sent, len - sent, 0);
-        if (rc == SOCKET_ERROR || rc == 0) return false;
-        sent += rc;
-    }
-    return true;
-}
 
 // поток приёма сообщений (построчный парсинг + блок [USERS])
 static void receiveLoop(SOCKET sock) {

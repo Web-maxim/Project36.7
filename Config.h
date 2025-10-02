@@ -1,5 +1,4 @@
-﻿#pragma once
-// Config.h
+﻿// Config.h
 #pragma once
 #include <string>
 #include <map>

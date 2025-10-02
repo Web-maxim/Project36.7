@@ -1,9 +1,10 @@
 ﻿// MainWindow.cpp
 #include "MainWindow.h"
-
+#include <QDateTime>
 #include <ctime>        // time()
 #include <QAction>
 #include <QCoreApplication>
+#include <QApplication>  // NEW: для qApp->setStyle
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QProcess>
@@ -37,7 +38,7 @@ MainWindow::MainWindow(QWidget* parent)
     usersModel_->setHorizontalHeaderLabels({ tr("Login") });
 
     messagesModel_ = new QStandardItemModel(this);
-    messagesModel_->setHorizontalHeaderLabels({ tr("ID"), tr("Sender"), tr("Recipient"), tr("Text") });
+    messagesModel_->setHorizontalHeaderLabels({ tr("ID"), tr("Time"), tr("Sender"), tr("Recipient"), tr("Text") });
 
     // Привязка к таблицам
     usersView_->setModel(usersModel_);
@@ -53,10 +54,20 @@ MainWindow::MainWindow(QWidget* parent)
     pal.setColor(QPalette::Inactive, QPalette::HighlightedText, pal.color(QPalette::Active, QPalette::HighlightedText));
     usersView_->setPalette(pal);
 
-
     messagesView_->setModel(messagesModel_);
     messagesView_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     messagesView_->horizontalHeader()->setStretchLastSection(true);
+
+    // NEW: лёгкий твик внешнего вида и удобства
+    qApp->setStyle("Fusion");
+    setStyleSheet("QTableView { gridline-color: #bbb; }");
+    usersView_->setAlternatingRowColors(true);
+    messagesView_->setAlternatingRowColors(true);
+    usersView_->verticalHeader()->setVisible(false);
+    messagesView_->verticalHeader()->setVisible(false);
+    usersView_->setSortingEnabled(true);
+    messagesView_->setSortingEnabled(true);
+    messagesView_->sortByColumn(1, Qt::DescendingOrder); // 1 = "Time"
 
     // Вкладки
     tabs_->addTab(usersView_, tr("Users"));
@@ -195,17 +206,45 @@ void MainWindow::refreshUsers() {
     }
 }
 
-
 void MainWindow::refreshMessages() {
     auto msgs = db_.getAllMessages();
     messagesModel_->removeRows(0, messagesModel_->rowCount());
     messagesModel_->setRowCount((int)msgs.size());
+
     for (int i = 0; i < (int)msgs.size(); ++i) {
         const auto& m = msgs[i];
+
+        // ID
         messagesModel_->setItem(i, 0, new QStandardItem(QString::number(m.id)));
-        messagesModel_->setItem(i, 1, new QStandardItem(QString::fromStdString(m.sender)));
-        messagesModel_->setItem(i, 2, new QStandardItem(QString::fromStdString(m.recipient)));
-        messagesModel_->setItem(i, 3, new QStandardItem(QString::fromStdString(m.text)));
+
+        // Time (для старых записей 0 покажем "-")
+        QString ts = m.created_at > 0
+            ? QDateTime::fromSecsSinceEpoch(static_cast<qint64>(m.created_at)).toString("yyyy-MM-dd HH:mm:ss")
+            : "-";
+        messagesModel_->setItem(i, 1, new QStandardItem(ts));
+
+        // Sender
+        messagesModel_->setItem(i, 2, new QStandardItem(QString::fromStdString(m.sender)));
+
+        // Recipient: показываем "ALL" если пусто + подсветка приватных
+        auto* recItem = new QStandardItem(
+            m.recipient.empty() ? QStringLiteral("ALL")
+            : QString::fromStdString(m.recipient));
+        messagesModel_->setItem(i, 3, recItem);
+
+        // Text
+        messagesModel_->setItem(i, 4, new QStandardItem(QString::fromStdString(m.text)));
+
+        // NEW: если приватное (recipient не пуст) — выделим строку
+        if (!m.recipient.empty()) {
+            QFont f = recItem->font();
+            f.setItalic(true);
+            recItem->setFont(f);
+            for (int col = 0; col <= 4; ++col) {
+                auto* it = messagesModel_->item(i, col);
+                if (it) it->setForeground(QBrush(Qt::darkGreen));
+            }
+        }
     }
 }
 
